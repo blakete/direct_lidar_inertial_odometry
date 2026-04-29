@@ -115,6 +115,15 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub;
   rclcpp::CallbackGroup::SharedPtr lidar_cb_group, imu_cb_group;
 
+  // One-shot subscription used to seed the initial pose from an external
+  // source (e.g. motion capture). Active only when `initial_pose_topic_` is
+  // non-empty; resets to nullptr after the first message is consumed.
+  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr initial_pose_sub;
+  void callbackInitialPose(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+  std::string initial_pose_topic_;
+  std::atomic<bool> initial_pose_required;
+  std::atomic<bool> initial_pose_received;
+
   // Publishers
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub;

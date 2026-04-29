@@ -30,6 +30,8 @@ dlio::OdomNode::OdomNode() : Node("dlio_odom_node") {
   else {this->imu_calibrated = true;}
   this->deskew_status = false;
   this->deskew_size = 0;
+  this->initial_pose_required = !this->initial_pose_topic_.empty();
+  this->initial_pose_received = !this->initial_pose_required;
 
   this->lidar_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   auto lidar_sub_opt = rclcpp::SubscriptionOptions();
@@ -42,6 +44,15 @@ dlio::OdomNode::OdomNode() : Node("dlio_odom_node") {
   imu_sub_opt.callback_group = this->imu_cb_group;
   this->imu_sub = this->create_subscription<sensor_msgs::msg::Imu>("imu", rclcpp::SensorDataQoS(),
       std::bind(&dlio::OdomNode::callbackImu, this, std::placeholders::_1), imu_sub_opt);
+
+  if (this->initial_pose_required) {
+    this->initial_pose_sub = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+        this->initial_pose_topic_, 1,
+        std::bind(&dlio::OdomNode::callbackInitialPose, this, std::placeholders::_1));
+    RCLCPP_INFO(this->get_logger(),
+                "Holding DLIO initialization until first PoseStamped arrives on '%s'.",
+                this->initial_pose_topic_.c_str());
+  }
 
   this->odom_pub     = this->create_publisher<nav_msgs::msg::Odometry>("odom", 1);
   this->pose_pub     = this->create_publisher<geometry_msgs::msg::PoseStamped>("pose", 1);
@@ -187,6 +198,13 @@ void dlio::OdomNode::getParams() {
   dlio::declare_param(this, "frames/baselink", this->baselink_frame, "base_link");
   dlio::declare_param(this, "frames/lidar", this->lidar_frame, "lidar");
   dlio::declare_param(this, "frames/imu", this->imu_frame, "imu");
+
+  // Optional: seed the initial pose from a one-shot PoseStamped on this topic
+  // (e.g. motion capture). When non-empty, DLIO holds initialization until the
+  // first message arrives, then anchors its odom frame to that pose so its
+  // outputs live in the seed's world from the start. Empty (default) keeps
+  // the legacy behavior of starting at the origin.
+  dlio::declare_param(this, "initial_pose_topic", this->initial_pose_topic_, std::string(""));
 
   // Namespace the frames
   this->odom_frame = std::string(this->get_namespace()) + "/" + std::string(this->odom_frame);
@@ -781,9 +799,50 @@ void dlio::OdomNode::initializeDLIO() {
     return;
   }
 
+  // Wait for the initial-pose seed if one was requested via parameter.
+  if (this->initial_pose_required && !this->initial_pose_received) {
+    return;
+  }
+
   this->dlio_initialized = true;
   std::cout << std::endl << " DLIO initialized!" << std::endl;
 
+}
+
+void dlio::OdomNode::callbackInitialPose(
+    const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+
+  if (this->initial_pose_received) return;
+
+  // Anchor DLIO's odom frame to the seed pose: state.p / state.q define where
+  // the rover sits in odom-frame coords, and seeding them with the seed pose
+  // makes DLIO's odom frame numerically equal to the seed's parent frame from
+  // the very first scan. T / T_prior / lidarPose are derived consistently so
+  // pre-IMU-calibration code paths see the same starting transform.
+  const auto& p = msg->pose.position;
+  const auto& q = msg->pose.orientation;
+  this->state.p = Eigen::Vector3f(static_cast<float>(p.x), static_cast<float>(p.y),
+                                  static_cast<float>(p.z));
+  this->state.q = Eigen::Quaternionf(static_cast<float>(q.w), static_cast<float>(q.x),
+                                     static_cast<float>(q.y), static_cast<float>(q.z));
+  this->state.q.normalize();
+
+  this->lidarPose.p = this->state.p;
+  this->lidarPose.q = this->state.q;
+
+  this->T = Eigen::Matrix4f::Identity();
+  this->T.block<3, 3>(0, 0) = this->state.q.toRotationMatrix();
+  this->T.block<3, 1>(0, 3) = this->state.p;
+  this->T_prior = this->T;
+
+  this->initial_pose_received = true;
+  this->initial_pose_sub.reset();
+
+  RCLCPP_INFO(this->get_logger(),
+              "Seeded initial pose from '%s': t=(%.3f, %.3f, %.3f), "
+              "q=(%.3f, %.3f, %.3f, %.3f) (parent frame: %s).",
+              this->initial_pose_topic_.c_str(), p.x, p.y, p.z, q.x, q.y, q.z, q.w,
+              msg->header.frame_id.c_str());
 }
 
 void dlio::OdomNode::callbackPointCloud(const sensor_msgs::msg::PointCloud2::SharedPtr pc) {

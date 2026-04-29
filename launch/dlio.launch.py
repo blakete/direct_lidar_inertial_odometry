@@ -38,6 +38,14 @@ def generate_launch_description():
         default_value='RR01',
         description='Node namespace'
     )
+    declare_initial_pose_topic_arg = DeclareLaunchArgument(
+        'initial_pose_topic',
+        default_value='',
+        description='If set, DLIO subscribes to this PoseStamped topic and uses '
+                    'the first message as its initial pose (so its odom frame '
+                    'is anchored to that pose, e.g. mocap world). Empty = legacy '
+                    'behavior (start at the origin).'
+    )
 
     # Opaque function to launch nodes
     def launch_setup(context, *args, **kwargs):
@@ -47,6 +55,7 @@ def generate_launch_description():
         pointcloud_topic = LaunchConfiguration('pointcloud_topic').perform(context)
         imu_topic = LaunchConfiguration('imu_topic').perform(context)
         namespace = LaunchConfiguration('namespace').perform(context)
+        initial_pose_topic = LaunchConfiguration('initial_pose_topic').perform(context)
 
         # Load parameters
         current_pkg = FindPackageShare('direct_lidar_inertial_odometry')
@@ -59,7 +68,11 @@ def generate_launch_description():
             executable='dlio_odom_node',
             output='screen',
             namespace=namespace,
-            parameters=[dlio_yaml_path, dlio_params_yaml_path],
+            parameters=[
+                dlio_yaml_path,
+                dlio_params_yaml_path,
+                {'initial_pose_topic': initial_pose_topic},
+            ],
             remappings=[
                 ('pointcloud', pointcloud_topic),
                 ('imu', imu_topic),
@@ -108,5 +121,6 @@ def generate_launch_description():
         declare_pointcloud_topic_arg,
         declare_imu_topic_arg,
         declare_namespace_arg,
+        declare_initial_pose_topic_arg,
         OpaqueFunction(function=launch_setup),
     ])
