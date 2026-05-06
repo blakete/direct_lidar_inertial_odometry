@@ -135,6 +135,11 @@ dlio::OdomNode::OdomNode() : Node("dlio_odom_node") {
   this->geo.first_opt_done = false;
   this->geo.prev_vel = Eigen::Vector3f(0., 0., 0.);
 
+  this->two_d_z_locked_ = false;
+  this->two_d_z_const_ = 0.0;
+  this->two_d_z_sum_ = 0.0;
+  this->two_d_z_count_ = 0;
+
   pcl::console::setVerbosityLevel(pcl::console::L_ERROR);
 
   this->crop.setNegative(true);
@@ -205,6 +210,14 @@ void dlio::OdomNode::getParams() {
   // outputs live in the seed's world from the start. Empty (default) keeps
   // the legacy behavior of starting at the origin.
   dlio::declare_param(this, "initial_pose_topic", this->initial_pose_topic_, std::string(""));
+
+  // 2D-only output override. Off by default; meant for flat-environment runs
+  // (e.g. ground robot in mocap) where downstream consumers want a constant z.
+  // `output/twoDInitSamples` controls how many initial publish-time z samples
+  // are averaged into the constant when no seed pose is available; ignored
+  // when an `initial_pose_topic` is provided (the seed's z is used directly).
+  dlio::declare_param(this, "output/twoDOnly", this->two_d_only_, false);
+  dlio::declare_param(this, "output/twoDInitSamples", this->two_d_init_samples_, 50);
 
   // Namespace the frames
   this->odom_frame = std::string(this->get_namespace()) + "/" + std::string(this->odom_frame);
@@ -341,7 +354,28 @@ void dlio::OdomNode::start() {
 
 }
 
+double dlio::OdomNode::effectivePublishZ() {
+  const double raw_z = static_cast<double>(this->state.p[2]);
+  if (!this->two_d_only_) return raw_z;
+
+  std::lock_guard<std::mutex> lock(this->two_d_z_mutex_);
+  if (this->two_d_z_locked_) return this->two_d_z_const_;
+
+  this->two_d_z_sum_ += raw_z;
+  this->two_d_z_count_ += 1;
+  if (this->two_d_init_samples_ > 0 &&
+      this->two_d_z_count_ >= this->two_d_init_samples_) {
+    this->two_d_z_const_ = this->two_d_z_sum_ /
+                           static_cast<double>(this->two_d_z_count_);
+    this->two_d_z_locked_ = true;
+    return this->two_d_z_const_;
+  }
+  return this->two_d_z_sum_ / static_cast<double>(this->two_d_z_count_);
+}
+
 void dlio::OdomNode::publishPose() {
+
+  const double z_out = this->effectivePublishZ();
 
   // nav_msgs::msg::Odometry
   this->odom_ros.header.stamp = this->imu_stamp;
@@ -350,7 +384,7 @@ void dlio::OdomNode::publishPose() {
 
   this->odom_ros.pose.pose.position.x = this->state.p[0];
   this->odom_ros.pose.pose.position.y = this->state.p[1];
-  this->odom_ros.pose.pose.position.z = this->state.p[2];
+  this->odom_ros.pose.pose.position.z = z_out;
 
   this->odom_ros.pose.pose.orientation.w = this->state.q.w();
   this->odom_ros.pose.pose.orientation.x = this->state.q.x();
@@ -373,7 +407,7 @@ void dlio::OdomNode::publishPose() {
 
   this->pose_ros.pose.position.x = this->state.p[0];
   this->pose_ros.pose.position.y = this->state.p[1];
-  this->pose_ros.pose.position.z = this->state.p[2];
+  this->pose_ros.pose.position.z = z_out;
 
   this->pose_ros.pose.orientation.w = this->state.q.w();
   this->pose_ros.pose.orientation.x = this->state.q.x();
@@ -390,7 +424,7 @@ void dlio::OdomNode::publishPose() {
 
   transformStamped.transform.translation.x = this->state.p[0];
   transformStamped.transform.translation.y = this->state.p[1];
-  transformStamped.transform.translation.z = this->state.p[2];
+  transformStamped.transform.translation.z = z_out;
 
   transformStamped.transform.rotation.w = this->state.q.w();
   transformStamped.transform.rotation.x = this->state.q.x();
@@ -404,6 +438,8 @@ void dlio::OdomNode::publishPose() {
 void dlio::OdomNode::publishToROS(pcl::PointCloud<PointType>::ConstPtr published_cloud, Eigen::Matrix4f T_cloud) {
   this->publishCloud(published_cloud, T_cloud);
 
+  const double z_out = this->effectivePublishZ();
+
   // nav_msgs::msg::Path
   this->path_ros.header.stamp = this->imu_stamp;
   this->path_ros.header.frame_id = this->odom_frame;
@@ -413,7 +449,7 @@ void dlio::OdomNode::publishToROS(pcl::PointCloud<PointType>::ConstPtr published
   p.header.frame_id = this->odom_frame;
   p.pose.position.x = this->state.p[0];
   p.pose.position.y = this->state.p[1];
-  p.pose.position.z = this->state.p[2];
+  p.pose.position.z = z_out;
   p.pose.orientation.w = this->state.q.w();
   p.pose.orientation.x = this->state.q.x();
   p.pose.orientation.y = this->state.q.y();
@@ -834,6 +870,15 @@ void dlio::OdomNode::callbackInitialPose(
   this->T.block<3, 3>(0, 0) = this->state.q.toRotationMatrix();
   this->T.block<3, 1>(0, 3) = this->state.p;
   this->T_prior = this->T;
+
+  // In 2D-only mode the seed's z is the authoritative constant: lock it now
+  // so the very first published pose already carries the flat z, with no
+  // averaging window during which the output could drift.
+  if (this->two_d_only_) {
+    std::lock_guard<std::mutex> lock(this->two_d_z_mutex_);
+    this->two_d_z_const_ = static_cast<double>(p.z);
+    this->two_d_z_locked_ = true;
+  }
 
   this->initial_pose_received = true;
   this->initial_pose_sub.reset();

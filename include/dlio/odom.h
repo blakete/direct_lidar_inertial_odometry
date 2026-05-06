@@ -59,6 +59,11 @@ private:
 
   void publishPose();
 
+  // 2D-only output override: returns the z value to publish given the current
+  // internal state.p[2]. Has side effects (updates running average / locks the
+  // constant once enough samples are gathered) so call exactly once per publish.
+  double effectivePublishZ();
+
   void publishToROS(pcl::PointCloud<PointType>::ConstPtr published_cloud, Eigen::Matrix4f T_cloud);
   void publishCloud(pcl::PointCloud<PointType>::ConstPtr published_cloud, Eigen::Matrix4f T_cloud);
   void publishKeyframe(std::pair<std::pair<Eigen::Vector3f, Eigen::Quaternionf>,
@@ -371,5 +376,18 @@ private:
   double geo_Kgb_;
   double geo_abias_max_;
   double geo_gbias_max_;
+
+  // 2D-only output mode: when enabled, the published odom/pose/path/TF z
+  // values are overwritten with `two_d_z_const_`. Internal state is untouched.
+  // The constant is pinned to the initial-pose seed's z when available;
+  // otherwise it's the average of the first `two_d_init_samples_` internal
+  // z values observed at publish time.
+  bool two_d_only_;
+  int two_d_init_samples_;
+  std::mutex two_d_z_mutex_;
+  bool two_d_z_locked_;
+  double two_d_z_const_;
+  double two_d_z_sum_;
+  int two_d_z_count_;
 
 };

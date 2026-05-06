@@ -46,6 +46,14 @@ def generate_launch_description():
                     'is anchored to that pose, e.g. mocap world). Empty = legacy '
                     'behavior (start at the origin).'
     )
+    declare_two_d_only_arg = DeclareLaunchArgument(
+        'two_d_only',
+        default_value='false',
+        description='If true, overwrite the published z (in odom/pose/path/TF) '
+                    'with a constant. Pinned to the seed pose z when '
+                    'initial_pose_topic is set; otherwise averaged from the '
+                    'first samples. Internal odometry estimation is unchanged.'
+    )
 
     # Opaque function to launch nodes
     def launch_setup(context, *args, **kwargs):
@@ -56,6 +64,8 @@ def generate_launch_description():
         imu_topic = LaunchConfiguration('imu_topic').perform(context)
         namespace = LaunchConfiguration('namespace').perform(context)
         initial_pose_topic = LaunchConfiguration('initial_pose_topic').perform(context)
+        two_d_only_str = LaunchConfiguration('two_d_only').perform(context)
+        two_d_only = two_d_only_str.lower() in ('true', '1', 'yes')
 
         # Load parameters
         current_pkg = FindPackageShare('direct_lidar_inertial_odometry')
@@ -72,6 +82,7 @@ def generate_launch_description():
                 dlio_yaml_path,
                 dlio_params_yaml_path,
                 {'initial_pose_topic': initial_pose_topic},
+                {'output/twoDOnly': two_d_only},
             ],
             remappings=[
                 ('pointcloud', pointcloud_topic),
@@ -122,5 +133,6 @@ def generate_launch_description():
         declare_imu_topic_arg,
         declare_namespace_arg,
         declare_initial_pose_topic_arg,
+        declare_two_d_only_arg,
         OpaqueFunction(function=launch_setup),
     ])
