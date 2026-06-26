@@ -977,8 +977,8 @@ void dlio::OdomNode::callbackPointCloud(const sensor_msgs::msg::PointCloud2::Sha
   } else {
     published_cloud = this->deskewed_scan;
   }
-  // this->publish_thread = std::thread( &dlio::OdomNode::publishToROS, this, published_cloud, this->T_corr );
-  // this->publish_thread.detach();
+  this->publishToROS(published_cloud, this->T_corr);
+
 
   // Update some statistics
   this->comp_times.push_back(this->now().seconds() - then);
