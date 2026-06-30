@@ -219,11 +219,21 @@ void dlio::OdomNode::getParams() {
   dlio::declare_param(this, "output/twoDOnly", this->two_d_only_, false);
   dlio::declare_param(this, "output/twoDInitSamples", this->two_d_init_samples_, 50);
 
-  // Namespace the frames
-  this->odom_frame = std::string(this->get_namespace()) + "/" + std::string(this->odom_frame);
-  this->baselink_frame = std::string(this->get_namespace()) + "/" + std::string(this->baselink_frame);
-  this->lidar_frame = std::string(this->get_namespace()) + "/" + std::string(this->lidar_frame);
-  this->imu_frame = std::string(this->get_namespace()) + "/" + std::string(this->imu_frame);
+  // Namespace the frames. get_namespace() returns "/RR08"; drop the leading
+  // slash so frame_ids are canonical "RR08/odom" (not "/RR08/odom"). tf2 treats
+  // leading-slash frame_ids as invalid, and the slashed names don't match the
+  // no-slash static TFs (RR08/map->RR08/odom, RR08/base_link->RR08/lidar) or the
+  // master RViz config. Skip prefixing entirely at the root namespace ("/").
+  std::string ns = this->get_namespace();
+  if (!ns.empty() && ns.front() == '/') {
+    ns.erase(0, 1);
+  }
+  if (!ns.empty()) {
+    this->odom_frame     = ns + "/" + this->odom_frame;
+    this->baselink_frame = ns + "/" + this->baselink_frame;
+    this->lidar_frame    = ns + "/" + this->lidar_frame;
+    this->imu_frame      = ns + "/" + this->imu_frame;
+  }
 
   // Deskew Flag
   dlio::declare_param(this, "pointcloud/deskew", this->deskew_, true);
