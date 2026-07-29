@@ -220,10 +220,12 @@ void dlio::OdomNode::getParams() {
   dlio::declare_param(this, "output/twoDInitSamples", this->two_d_init_samples_, 50);
 
   // Namespace the frames
-  this->odom_frame = std::string(this->get_namespace()) + "/" + std::string(this->odom_frame);
-  this->baselink_frame = std::string(this->get_namespace()) + "/" + std::string(this->baselink_frame);
-  this->lidar_frame = std::string(this->get_namespace()) + "/" + std::string(this->lidar_frame);
-  this->imu_frame = std::string(this->get_namespace()) + "/" + std::string(this->imu_frame);
+  std::string ns = std::string(this->get_namespace());
+  if (!ns.empty() && ns.front() == '/') ns.erase(0, 1);   // frame ids must not start with '/'
+  this->odom_frame = ns + "/" + std::string(this->odom_frame);
+  this->baselink_frame = ns + "/" + std::string(this->baselink_frame);
+  this->lidar_frame = ns + "/" + std::string(this->lidar_frame);
+  this->imu_frame = ns + "/" + std::string(this->imu_frame);
 
   // Deskew Flag
   dlio::declare_param(this, "pointcloud/deskew", this->deskew_, true);
@@ -977,8 +979,8 @@ void dlio::OdomNode::callbackPointCloud(const sensor_msgs::msg::PointCloud2::Sha
   } else {
     published_cloud = this->deskewed_scan;
   }
-  // this->publish_thread = std::thread( &dlio::OdomNode::publishToROS, this, published_cloud, this->T_corr );
-  // this->publish_thread.detach();
+  this->publish_thread = std::thread( &dlio::OdomNode::publishToROS, this, published_cloud, this->T_corr );
+  this->publish_thread.detach();
 
   // Update some statistics
   this->comp_times.push_back(this->now().seconds() - then);

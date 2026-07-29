@@ -18,7 +18,7 @@
     frames/lidar: lidar
     frames/imu: imu
 
-    map/waitUntilMove: true
+    map/waitUntilMove: false
     map/dense/filtered: false
     map/sparse/leafSize: 0.25
 
