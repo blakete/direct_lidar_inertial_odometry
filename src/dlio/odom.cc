@@ -989,7 +989,6 @@ void dlio::OdomNode::callbackPointCloud(const sensor_msgs::msg::PointCloud2::Sha
   }
   this->publishToROS(published_cloud, this->T_corr);
 
-
   // Update some statistics
   this->comp_times.push_back(this->now().seconds() - then);
   this->gicp_hasConverged = this->gicp.hasConverged();
