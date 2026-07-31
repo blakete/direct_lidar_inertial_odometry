@@ -527,7 +527,7 @@ void dlio::OdomNode::publishToROS(pcl::PointCloud<PointType>::ConstPtr published
   transformStamped.transform.rotation.y = qq.y();
   transformStamped.transform.rotation.z = qq.z();
 
-  // br->sendTransform(transformStamped);
+  br->sendTransform(transformStamped);
 
 }
 
